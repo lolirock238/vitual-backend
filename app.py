@@ -2,27 +2,25 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from database import SessionLocal, init_db
-from models import Category, Item, Outfit, ItemImage, OutfitItem
-import os
+from typing import Optional
 import shutil
+import os
 import json
 
-# Initialize DB tables
+from database import SessionLocal, init_db
+from models import Category, Item, Outfit, ItemImage, OutfitItem
+
+# Initialize database tables
 init_db()
 
-app = FastAPI()
+app = FastAPI(title="Virtual Organizer API")
 
-# =========================
-# STATIC FILES
-# =========================
+# Static folder for uploaded images
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-# =========================
-# DATABASE SESSION
-# =========================
+# Dependency to get DB session
 def get_db():
     db = SessionLocal()
     try:
@@ -30,9 +28,16 @@ def get_db():
     finally:
         db.close()
 
-# =========================
+# ----------------------------
+# Root endpoint
+# ----------------------------
+@app.get("/")
+def root():
+    return {"message": "Welcome to Virtual Organizer API"}
+
+# ----------------------------
 # CATEGORY ENDPOINTS
-# =========================
+# ----------------------------
 @app.post("/categories/")
 def create_category(name: str = Form(...), db: Session = Depends(get_db)):
     category = Category(name=name)
@@ -45,16 +50,15 @@ def create_category(name: str = Form(...), db: Session = Depends(get_db)):
 def get_categories(db: Session = Depends(get_db)):
     return db.query(Category).all()
 
-# =========================
+# ----------------------------
 # ITEM ENDPOINTS
-# =========================
+# ----------------------------
 @app.post("/items/")
 def create_item(
     category_id: int = Form(...),
     image: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    # Validate category exists
     category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -77,7 +81,11 @@ def create_item(
     db.commit()
     db.refresh(item_image)
 
-    return {"id": item.id, "category_id": item.category_id, "image_url": item_image.image_url}
+    return {
+        "id": item.id,
+        "category_id": item.category_id,
+        "image_url": item_image.image_url
+    }
 
 @app.get("/items/")
 def get_items(db: Session = Depends(get_db)):
@@ -92,14 +100,14 @@ def get_items(db: Session = Depends(get_db)):
         })
     return results
 
-# =========================
+# ----------------------------
 # OUTFIT ENDPOINTS
-# =========================
+# ----------------------------
 @app.post("/outfits/")
 def create_outfit(
     name: str = Form(...),
-    items: str = Form(...),  # JSON list of item IDs
-    image: UploadFile = File(None),
+    items: str = Form(...),  # JSON string list of item IDs
+    image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
     # Save outfit image if provided
@@ -107,8 +115,8 @@ def create_outfit(
     if image:
         filename = f"outfit_{image.filename}"
         filepath = os.path.join(UPLOAD_DIR, filename)
-        with open(filepath, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
+        with open(filepath, "wb") as f:
+            shutil.copyfileobj(image.file, f)
         image_url = f"/uploads/{filename}"
 
     # Create outfit
