@@ -1,6 +1,7 @@
-# app.py
+# app.py - UPDATED VERSION WITH DELETE ENDPOINTS
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import Optional
 import shutil
@@ -14,6 +15,15 @@ from models import Category, Item, Outfit, ItemImage, OutfitItem
 init_db()
 
 app = FastAPI(title="Virtual Organizer API")
+
+# Enable CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Static folder for uploaded images
 UPLOAD_DIR = "uploads"
@@ -100,6 +110,26 @@ def get_items(db: Session = Depends(get_db)):
         })
     return results
 
+@app.delete("/items/{item_id}")
+def delete_item(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    # Delete associated images from filesystem
+    images = db.query(ItemImage).filter(ItemImage.item_id == item_id).all()
+    for image in images:
+        # Extract filename and delete file
+        filename = image.image_url.replace("/uploads/", "")
+        filepath = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(filepath):
+            os.remove(filepath)
+    
+    # Delete from database (cascade will handle ItemImage and OutfitItem)
+    db.delete(item)
+    db.commit()
+    return {"message": "Item deleted successfully"}
+
 # ----------------------------
 # OUTFIT ENDPOINTS
 # ----------------------------
@@ -162,3 +192,21 @@ def get_outfits(db: Session = Depends(get_db)):
             "items": [i.item_id for i in items]
         })
     return results
+
+@app.delete("/outfits/{outfit_id}")
+def delete_outfit(outfit_id: int, db: Session = Depends(get_db)):
+    outfit = db.query(Outfit).filter(Outfit.id == outfit_id).first()
+    if not outfit:
+        raise HTTPException(status_code=404, detail="Outfit not found")
+    
+    # Delete outfit image if exists
+    if outfit.image_url:
+        filename = outfit.image_url.replace("/uploads/", "")
+        filepath = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(filepath):
+            os.remove(filepath)
+    
+    # Delete from database (cascade will handle OutfitItem)
+    db.delete(outfit)
+    db.commit()
+    return {"message": "Outfit deleted successfully"}
